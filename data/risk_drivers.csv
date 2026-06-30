@@ -1,0 +1,7 @@
+Risk,Category,Probability,Revenue_Impact,Cost_Impact,Mitigation
+Customer concentration,Commercial,0.35,-0.08,0.00,Accelerate account diversification and reduce top-customer dependency.
+Churn spike,Commercial,0.25,-0.10,0.01,Launch retention playbook for high-risk customer cohorts.
+Pricing pressure,Market,0.30,-0.06,0.00,Segment pricing actions and defend value-based bundles.
+Hiring delay,Execution,0.28,-0.03,-0.02,Prioritize critical roles and use contractors for bottleneck functions.
+Implementation delay,Execution,0.22,-0.05,0.02,Create delivery war room and weekly milestone escalation.
+Supplier inflation,Operations,0.32,0.00,0.05,Renegotiate vendor terms and identify second-source suppliers.
