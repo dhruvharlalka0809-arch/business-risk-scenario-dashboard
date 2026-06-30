@@ -2,6 +2,10 @@
 
 A Streamlit dashboard for business risk analysis, scenario planning, cash runway monitoring, EBITDA stress testing, and consultant-style mitigation recommendations.
 
+## Live Demo
+
+[Open the Streamlit app](https://business-risk-scenario-dashboard.streamlit.app/)
+
 ## What It Does
 
 - Models Upside, Base, Downside, and Stress scenarios
