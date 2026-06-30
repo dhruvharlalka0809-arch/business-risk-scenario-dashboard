@@ -49,18 +49,35 @@ with st.sidebar:
     monthly_growth = st.slider("Monthly revenue growth", -0.05, 0.12, 0.035, 0.005)
     gross_margin = st.slider("Gross margin", 0.25, 0.85, 0.62, 0.01)
     fixed_cost = st.slider("Monthly fixed cost", 0.5, 6.0, 2.35, 0.05)
-    variable_cost_pct = st.slider("Variable cost / revenue", 0.02, 0.35, 0.18, 0.01)
+    variable_opex_pct = st.slider(
+        "Variable OpEx / revenue",
+        0.02,
+        0.35,
+        0.18,
+        0.01,
+        help="Gross margin captures COGS. Variable OpEx captures revenue-linked sales, support, and delivery costs.",
+    )
+    capex_pct = st.slider("Capex / revenue", 0.00, 0.12, 0.025, 0.005)
+    nwc_pct = st.slider("NWC / revenue", 0.00, 0.08, 0.015, 0.005)
+    ebitda_margin_floor = st.slider("EBITDA margin risk floor", 0.00, 0.30, 0.15, 0.01)
     starting_cash = st.slider("Starting cash", 1.0, 25.0, 9.5, 0.5)
     minimum_cash_buffer = st.slider("Minimum cash buffer", 0.5, 8.0, 2.0, 0.25)
+    with st.expander("Risk score methodology"):
+        st.write("Cash pressure, EBITDA margin pressure, growth pressure, and execution risk are combined into a 0-100 risk score.")
+        st.write("Revenue shocks are permanent level shifts to the starting revenue base, not one-month events.")
+        st.write("Cash balance equals starting cash plus EBITDA less capex and incremental working capital.")
 
 assumptions = BusinessAssumptions(
     starting_revenue=starting_revenue,
     monthly_growth=monthly_growth,
     gross_margin=gross_margin,
     fixed_cost=fixed_cost,
-    variable_cost_pct_revenue=variable_cost_pct,
+    variable_opex_pct_revenue=variable_opex_pct,
+    capex_pct_revenue=capex_pct,
+    nwc_pct_revenue=nwc_pct,
     starting_cash=starting_cash,
     minimum_cash_buffer=minimum_cash_buffer,
+    ebitda_margin_floor=ebitda_margin_floor,
 )
 
 drivers = load_drivers()
@@ -72,7 +89,7 @@ stress = scenario_summary.loc[scenario_summary["scenario"] == "Stress"].iloc[0]
 hero = st.columns(5)
 hero[0].metric("Base Status", str(base.status))
 hero[1].metric("Base Ending Cash", format_money(float(base.ending_cash)))
-hero[2].metric("Stress Runway", f"{int(stress.runway_months)} months")
+hero[2].metric("Stress Runway", f"{int(stress.runway_months)}+ months" if int(stress.runway_months) == assumptions.planning_months else f"{int(stress.runway_months)} months")
 hero[3].metric("Stress Risk Score", f"{float(stress.risk_score):.1f}/100")
 hero[4].metric("Base Break-even", str(base.break_even_month))
 
@@ -93,6 +110,7 @@ with snapshot_tab:
         st.write(f"Base case ends with **{format_money(float(base.ending_cash))}** cash and **{format_money(float(base.cumulative_ebitda))}** cumulative EBITDA.")
         st.write(f"Stress case ends with **{format_money(float(stress.ending_cash))}** cash and a **{float(stress.risk_score):.1f}/100** risk score.")
         st.write(f"Highest-priority risk: **{risk_register.iloc[0]['Risk']}**.")
+        st.caption("Revenue shocks are permanent level shifts. Cash balance subtracts capex and incremental working capital from EBITDA.")
 
     st.subheader("Risk Score by Scenario")
     risk_chart = scenario_summary[["scenario", "risk_score"]].set_index("scenario")
@@ -125,7 +143,7 @@ with risk_tab:
 
 with memo_tab:
     st.subheader("Consultant-Style Mitigation Memo")
-    memo = build_mitigation_memo(scenario_summary, risk_register, company_name)
+    memo = build_mitigation_memo(scenario_summary, risk_register, company_name, assumptions)
     st.markdown(memo)
     st.download_button("Download memo", memo, "business_risk_mitigation_memo.md", "text/markdown")
 
@@ -134,7 +152,7 @@ with data_tab:
     projection_display = projections.copy()
     projection_display = format_money_columns(
         format_percent_columns(projection_display, ["EBITDA_Margin"]),
-        ["Revenue", "Gross_Profit", "Operating_Cost", "EBITDA", "Cash_Balance"],
+        ["Revenue", "Gross_Profit", "Variable_OpEx", "Operating_Cost", "EBITDA", "Capex", "NWC_Balance", "NWC_Investment", "Cash_Flow", "Cash_Balance"],
     )
     st.dataframe(projection_display, use_container_width=True, hide_index=True)
     st.subheader("Source Risk Drivers")

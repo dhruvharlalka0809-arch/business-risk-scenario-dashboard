@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Optional
 
 import pandas as pd
 
@@ -11,9 +12,12 @@ class BusinessAssumptions:
     monthly_growth: float = 0.035
     gross_margin: float = 0.62
     fixed_cost: float = 2.35
-    variable_cost_pct_revenue: float = 0.18
+    variable_opex_pct_revenue: float = 0.18
+    capex_pct_revenue: float = 0.025
+    nwc_pct_revenue: float = 0.015
     starting_cash: float = 9.5
     minimum_cash_buffer: float = 2.0
+    ebitda_margin_floor: float = 0.15
     planning_months: int = 12
     revenue_shock: float = 0.00
     margin_shock: float = 0.00
@@ -54,42 +58,60 @@ def build_monthly_projection(assumptions: BusinessAssumptions) -> pd.DataFrame:
     adjusted_margin = max(0.05, assumptions.gross_margin + assumptions.margin_shock)
     adjusted_fixed_cost = assumptions.fixed_cost * (1 + assumptions.fixed_cost_shock + assumptions.execution_risk)
     revenue = assumptions.starting_revenue * (1 + assumptions.revenue_shock)
+    previous_nwc = assumptions.starting_revenue * assumptions.nwc_pct_revenue
 
     for month in range(1, assumptions.planning_months + 1):
         if month > 1:
             revenue *= 1 + monthly_growth
         gross_profit = revenue * adjusted_margin
-        variable_cost = revenue * assumptions.variable_cost_pct_revenue
-        operating_cost = adjusted_fixed_cost + variable_cost
+        variable_opex = revenue * assumptions.variable_opex_pct_revenue
+        operating_cost = adjusted_fixed_cost + variable_opex
         ebitda = gross_profit - operating_cost
-        cash_balance += ebitda
+        capex = revenue * assumptions.capex_pct_revenue
+        nwc_balance = revenue * assumptions.nwc_pct_revenue
+        nwc_investment = nwc_balance - previous_nwc
+        cash_flow = ebitda - capex - nwc_investment
+        cash_balance += cash_flow
         rows.append(
             {
                 "Month": month,
                 "Revenue": revenue,
                 "Gross_Profit": gross_profit,
+                "Variable_OpEx": variable_opex,
                 "Operating_Cost": operating_cost,
                 "EBITDA": ebitda,
                 "EBITDA_Margin": divide(ebitda, revenue),
+                "Capex": capex,
+                "NWC_Balance": nwc_balance,
+                "NWC_Investment": nwc_investment,
+                "Cash_Flow": cash_flow,
                 "Cash_Balance": cash_balance,
                 "Below_Buffer": cash_balance < assumptions.minimum_cash_buffer,
             }
         )
+        previous_nwc = nwc_balance
     return pd.DataFrame(rows)
 
 
 def calculate_risk_score(projection: pd.DataFrame, assumptions: BusinessAssumptions) -> float:
     cash_pressure = max(0.0, divide(assumptions.minimum_cash_buffer - float(projection["Cash_Balance"].min()), assumptions.minimum_cash_buffer))
-    margin_pressure = max(0.0, 0.15 - float(projection.iloc[-1]["EBITDA_Margin"]))
+    margin_pressure = max(0.0, assumptions.ebitda_margin_floor - float(projection.iloc[-1]["EBITDA_Margin"]))
     growth_pressure = max(0.0, 0.02 - (assumptions.monthly_growth - assumptions.churn_risk))
     score = (cash_pressure * 45) + (margin_pressure * 180) + (growth_pressure * 350) + (assumptions.execution_risk * 100)
     return min(100.0, round(score, 1))
 
 
+def calculate_runway(projection: pd.DataFrame, minimum_cash_buffer: float) -> int:
+    for row in projection.itertuples():
+        if float(row.Cash_Balance) < minimum_cash_buffer:
+            return int(row.Month) - 1
+    return len(projection)
+
+
 def summarize_projection(name: str, projection: pd.DataFrame, assumptions: BusinessAssumptions) -> ScenarioSummary:
     break_even_rows = projection.loc[projection["EBITDA"] >= 0]
     break_even_month = "Not reached" if break_even_rows.empty else f"Month {int(break_even_rows.iloc[0]['Month'])}"
-    runway_months = int((projection["Cash_Balance"] >= assumptions.minimum_cash_buffer).sum())
+    runway_months = calculate_runway(projection, assumptions.minimum_cash_buffer)
     risk_score = calculate_risk_score(projection, assumptions)
     status = classify_status(risk_score, float(projection.iloc[-1]["Cash_Balance"]), assumptions.minimum_cash_buffer)
     return ScenarioSummary(
@@ -126,11 +148,17 @@ def build_risk_register(drivers: pd.DataFrame) -> pd.DataFrame:
     output = drivers.copy()
     output["Expected_Revenue_Impact"] = output["Probability"] * output["Revenue_Impact"]
     output["Expected_Cost_Impact"] = output["Probability"] * output["Cost_Impact"]
-    output["Severity_Score"] = (output["Expected_Revenue_Impact"].abs() + output["Expected_Cost_Impact"].abs()) * 100
+    output["Severity_Score"] = (output["Expected_Revenue_Impact"].abs() + output["Expected_Cost_Impact"].clip(lower=0)) * 100
     return output.sort_values("Severity_Score", ascending=False).reset_index(drop=True)
 
 
-def build_mitigation_memo(summary: pd.DataFrame, risk_register: pd.DataFrame, company_name: str) -> str:
+def build_mitigation_memo(
+    summary: pd.DataFrame,
+    risk_register: pd.DataFrame,
+    company_name: str,
+    assumptions: Optional[BusinessAssumptions] = None,
+) -> str:
+    assumptions = assumptions or BusinessAssumptions()
     base = summary.loc[summary["scenario"] == "Base"].iloc[0]
     stress = summary.loc[summary["scenario"] == "Stress"].iloc[0]
     top_risks = risk_register.head(3)
@@ -144,6 +172,8 @@ def build_mitigation_memo(summary: pd.DataFrame, risk_register: pd.DataFrame, co
 **Stress case:** Ending cash falls to {format_money(float(stress.ending_cash))}, runway is {int(stress.runway_months)} months, and the risk score rises to {float(stress.risk_score):.1f}/100.
 
 **Decision readout:** {status_message(str(base.status), str(stress.status))}
+
+**Model disclosure:** Revenue shocks are modeled as permanent level shifts to the starting revenue base. Cash balance is starting cash plus EBITDA less capex and incremental working capital investment. Risk score weights cash pressure, EBITDA margin pressure versus a {assumptions.ebitda_margin_floor:.0%} floor, growth pressure versus 2% monthly growth, and execution risk.
 
 **Priority mitigations:**
 {mitigation_lines}
@@ -165,6 +195,8 @@ def status_message(base_status: str, stress_status: str) -> str:
         return "Base case is manageable, but the stress case needs active mitigation and cash-buffer monitoring."
     if base_status == "Escalate":
         return "The current operating plan requires immediate intervention before further growth investment."
+    if base_status == "Monitor" or stress_status == "Monitor":
+        return "The plan shows moderate risk signals. Increase review frequency and pre-position mitigations."
     return "The plan is resilient across the modeled range, with monitoring focused on the highest-severity risks."
 
 

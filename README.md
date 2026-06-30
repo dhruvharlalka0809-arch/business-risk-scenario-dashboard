@@ -6,6 +6,7 @@ A Streamlit dashboard for business risk analysis, scenario planning, cash runway
 
 - Models Upside, Base, Downside, and Stress scenarios
 - Tracks revenue, EBITDA, cash balance, runway, and break-even timing
+- Estimates cash balance using EBITDA less capex and incremental working capital investment
 - Scores scenario risk based on cash pressure, margin pressure, growth pressure, and execution risk
 - Ranks business risks by expected severity
 - Generates a mitigation memo for management or consulting-style reviews
@@ -41,6 +42,7 @@ python scripts/validate.py
 
 - Built an interactive scenario dashboard for revenue, margin, cost, runway, and execution-risk analysis
 - Created a quantitative risk score and risk-register ranking model
+- Added capex, working capital, true runway logic, and transparent risk-score methodology
 - Converted dashboard outputs into a consultant-style mitigation memo
 - Designed the project to support business analyst, consulting, strategy, risk, and finance roles
 

@@ -8,8 +8,10 @@ from src.risk_model import (
     build_monthly_projection,
     build_risk_register,
     build_scenarios,
+    calculate_runway,
     calculate_risk_score,
     load_risk_drivers,
+    status_message,
 )
 
 
@@ -32,6 +34,8 @@ class RiskModelTests(unittest.TestCase):
 
         self.assertEqual(len(projection), 12)
         self.assertIn("Cash_Balance", projection.columns)
+        self.assertIn("Cash_Flow", projection.columns)
+        self.assertIn("Capex", projection.columns)
         self.assertGreater(projection.iloc[-1]["Revenue"], projection.iloc[0]["Revenue"])
 
     def test_scenarios_include_base_downside_upside_and_stress(self):
@@ -54,12 +58,42 @@ class RiskModelTests(unittest.TestCase):
         self.assertIn("Severity_Score", register.columns)
         self.assertGreaterEqual(register.iloc[0]["Severity_Score"], register.iloc[-1]["Severity_Score"])
 
+    def test_cost_savings_do_not_increase_risk_severity(self):
+        drivers = pd.DataFrame(
+            {
+                "Risk": ["Cost saving delay"],
+                "Category": ["Execution"],
+                "Probability": [0.50],
+                "Revenue_Impact": [0.0],
+                "Cost_Impact": [-0.10],
+                "Mitigation": ["Reinvest savings carefully"],
+            }
+        )
+        register = build_risk_register(drivers)
+
+        self.assertEqual(register.iloc[0]["Severity_Score"], 0)
+
     def test_risk_score_is_bounded(self):
         projection = build_monthly_projection(self.assumptions)
         score = calculate_risk_score(projection, self.assumptions)
 
         self.assertGreaterEqual(score, 0)
         self.assertLessEqual(score, 100)
+
+    def test_runway_returns_month_before_buffer_breach(self):
+        projection = pd.DataFrame({"Month": [1, 2, 3], "Cash_Balance": [5.0, 1.5, 3.0]})
+
+        self.assertEqual(calculate_runway(projection, 2.0), 1)
+
+    def test_runway_returns_full_horizon_when_buffer_is_not_breached(self):
+        projection = pd.DataFrame({"Month": [1, 2, 3], "Cash_Balance": [5.0, 4.0, 3.0]})
+
+        self.assertEqual(calculate_runway(projection, 2.0), 3)
+
+    def test_monitor_status_has_moderate_risk_message(self):
+        message = status_message("Monitor", "Monitor")
+
+        self.assertIn("moderate risk", message)
 
     def test_driver_loader_validates_required_columns(self):
         loaded = load_risk_drivers("data/risk_drivers.csv")
